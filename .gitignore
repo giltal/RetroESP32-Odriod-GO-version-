@@ -75,6 +75,18 @@ Lib/site-packages/
 # IDE
 .vscode/
 
+# Debug logs
+paddle_debug*.txt
+
+# SD Card content (ROMs, large archives)
+SD Card/
+
+# Arduino compiled firmware
+Arduino/firmware/*.fw
+
+# ESP32 binary blobs in tools
+Odroid/odroid-go-firmware/tools/esp32img/*.bin
+
 # Large asset archives
 Emulators/retro-go/assets/romart-png.zip
 Assets/2.4/
