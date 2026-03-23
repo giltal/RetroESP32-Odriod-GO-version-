@@ -1,0 +1,68 @@
+#!/bin/bash
+
+REPO=$(dirname $PWD)
+CONFIGS="$REPO/Configs"
+LAUNCHERS="$REPO/Launchers"
+EMULATORS="$REPO/Emulators"
+ODROID="$REPO/Odroid"
+SOURCE=""
+
+# port
+version() {
+  clear
+  VERSIONS=("cute-esp32" "odroid-go" "retro-esp" "retro-esp-next" "retro-esp-slim")
+  OPTION="${monkey}  ${white}Please Select Your ${nc}${magentabg} ${white}Hardware ${nc} ${magenta}Version${nc}"
+  echo "--------------------------------------------------------------------------"
+  echo -e "${OPTION}"
+  echo "--------------------------------------------------------------------------"
+  select VERSION in "${VERSIONS[@]}"
+  do
+    case $VERSION in
+      * )
+        if [[ $VERSION[0,1] ]]
+        then
+          clear
+          echo "--------------------------------------------------------------------------"
+          echo -e "${squid}  ${green}Selected ${magenta}${VERSION#*.}${nc} Version"
+          echo "--------------------------------------------------------------------------"
+
+          SOURCE=$CONFIGS/$VERSION
+          replace
+          sleep 0.5
+          clear
+          break
+        else
+          version
+        fi
+    esac
+  done
+}
+
+replace() {
+  clear
+  echo "--------------------------------------------------------------------------"
+  echo -e "${robot}  ${green}Replacing CONFIG for ${cyan}EMULATORS${nc} files from ${red}${SOURCE}${nc}"
+  echo "--------------------------------------------------------------------------"
+  cp -R $SOURCE/Emulators/* $EMULATORS
+  sleep 1
+  clear
+  echo "--------------------------------------------------------------------------"
+  echo -e "${unicorn}  ${green}Replacing CONFIG for ${cyan}LAUNCHERS${nc} files from ${red}${SOURCE}${nc}"
+  echo "--------------------------------------------------------------------------"
+  cp -R $SOURCE/Launchers/* $LAUNCHERS
+  sleep 1
+  clear
+}
+
+# echo "--------------------------------------------------------------------------"
+# echo -e "${bomb}  ${red}Change Version ${nc}[y/${bold}N${nc}]"
+# echo "--------------------------------------------------------------------------"
+# read -n 1 -r response
+# if [[ "$response" = "y" ]]
+# then
+#   version
+# else
+#   VERSION="retro-esp"
+# fi
+version
+clear

@@ -1,0 +1,7 @@
+build/
+sdkconfig.old
+*.gch
+.DS_Store
+pcengine.fw
+pcengine-title.raw
+pcengine-title-resized.png
