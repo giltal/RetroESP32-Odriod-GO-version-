@@ -3,10 +3,7 @@
 # Build folders (ESP-IDF output)
 **/build/
 
-# Firmware binaries (generated, large)
-Firmware/Bins/*.bin
-Firmware/Bins/*.fw
-Firmware/Releases/*.fw
+# Firmware binaries — included for flashing
 
 # VS / CMake build output
 build/
@@ -78,8 +75,7 @@ Lib/site-packages/
 # Debug logs
 paddle_debug*.txt
 
-# SD Card content (ROMs, large archives)
-SD Card/
+# SD Card content — included for console setup
 
 # Arduino compiled firmware
 Arduino/firmware/*.fw
