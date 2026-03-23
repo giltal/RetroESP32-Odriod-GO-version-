@@ -24,7 +24,7 @@ import sys
 
 # ---------- Configuration ----------
 
-DESCRIPTION = "RetroESP32 v3.14"
+DESCRIPTION = "RetroESP32 v3.15"
 TILE_PATH = "Emulators/retro-go/assets/tile.raw"
 BINS_DIR = "Firmware/Bins"
 OUTPUT = "Firmware/Releases/RetroESP32.fw"

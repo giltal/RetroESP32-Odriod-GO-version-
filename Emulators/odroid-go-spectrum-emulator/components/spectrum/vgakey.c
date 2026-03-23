@@ -22,6 +22,7 @@
 #include "spkey.h"
 #include "spkey_p.h"
 #include "spperif.h"
+#include "z80.h"
 #include "vgascr.h"
 #include "akey.h"
 
@@ -113,7 +114,8 @@ void keyboard_update()
   odroid_gamepad_state joystick;
   int i;
   
-  for (i=0; i<LASTKEYCODE; i++) kbstate[i]=0;  
+  for (i=0; i<LASTKEYCODE; i++) kbstate[i]=0;
+  z80_inports[0x1F] = 0;
   odroid_input_gamepad_read(&joystick); 
   // first, process volume button...
   
@@ -133,7 +135,17 @@ void keyboard_update()
 //---------------------------------------   
   
   // 2 different approaches depending if virtual keyboard is actice...  
-  if (!keyboard) {      
+  if (!keyboard) {
+    // Kempston joystick: write directly to port 0x1F
+    byte kempston = 0;
+    if (joystick.values[ODROID_INPUT_UP])    kempston |= 0x08;
+    if (joystick.values[ODROID_INPUT_DOWN])  kempston |= 0x04;
+    if (joystick.values[ODROID_INPUT_LEFT])  kempston |= 0x02;
+    if (joystick.values[ODROID_INPUT_RIGHT]) kempston |= 0x01;
+    if (joystick.values[ODROID_INPUT_A])     kempston |= 0x10;
+    if (joystick.values[ODROID_INPUT_B])     kempston |= 0x10;
+    z80_inports[0x1F] = kempston;
+
     if (joystick.values[ODROID_INPUT_UP])     kbstate[map[b_up]]=1;
     if (joystick.values[ODROID_INPUT_DOWN])   kbstate[map[b_down]]=1; 
     if (joystick.values[ODROID_INPUT_LEFT])   kbstate[map[b_left]]=1;
