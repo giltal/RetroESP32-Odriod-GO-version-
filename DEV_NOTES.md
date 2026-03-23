@@ -867,6 +867,53 @@ The Odroid Go battery monitor reads ADC1_CH0 every 500ms in a background task �
 | v3.12 | March 9, 2026 | HUD in-game menu integrated into NES/GB/SMS emulators — odroid_hud.c/h copied, Kconfig.projbuild added, CONFIG_IN_GAME_MENU_YES enabled, source patched with #ifdef blocks, launcher A-button safe mode updated (NVS clear removed, 500ms GPIO settle, raw read) |
 | v3.13 | March 9, 2026 | Save hang fix — NES inverted wait condition `while(exitVideoTaskFlag)` → `while(!exitVideoTaskFlag)`, NES/SMS display mutex deadlock on save (unlock before sentinel, matching GB pattern) |
 | v3.14 | March 22–23, 2026 | Safe mode A-button bail-out added to all 9 emulators, volume clamp fix (abort→clamp) in all 9 emulators, Stella -O3 optimization, frodo-go/C64 removed from docs, full FW v3.14 generated |
+| v3.14.1 | March 23, 2026 | GitHub repository created (github.com/giltal/RetroESP32), project pushed with curated .gitignore, SD Card contents and firmware binaries added for flashing |
+
+---
+
+## GitHub Repository Setup (v3.14.1)
+
+### Repository
+
+**URL:** `https://github.com/giltal/RetroESP32`
+**Branch:** `main`
+**Pushed:** March 23, 2026
+
+### What's Included
+
+- All source code (Launchers, Emulators, Components, Configs, Scripts)
+- Documentation (README, LICENSE, DEV_NOTES, USAGE, DIY, CODE_OF_CONDUCT)
+- Asset images, fonts, sprites, icons
+- Build configuration files (Makefiles, sdkconfigs, partition tables)
+- Python tools (`mkfw.py`, `flash_carousel.py`)
+- Arduino source files (excluding compiled `.fw`)
+- **Firmware/Bins/** — all compiled `.bin` and `.fw` files for flashing
+- **Firmware/Releases/** — `RetroESP32.fw`, `boot_logo.bmp`
+- **SD Card/** — `SDCARD.zip`, C64 ROMs (`1541.rom`, `Basic.rom`, `Char.rom`, `Kernal.rom`)
+
+### What's Excluded (.gitignore)
+
+| Pattern | Purpose |
+|---------|---------|
+| `**/build/` | ESP-IDF and CMake build output |
+| `build/` | VS / CMake build output |
+| `*.o`, `*.obj`, `*.elf`, `*.exe`, `*.dll` | Compiled object files and executables |
+| `*.lib`, `*.a`, `*.so`, `*.dylib` | Library files |
+| `*.pdb`, `*.dSYM/`, `*.idb` | Debug symbols |
+| `__pycache__/`, `*.pyc` | Python bytecode |
+| `Lib/site-packages/` | Python virtual environment packages |
+| `.vscode/` | IDE settings |
+| `paddle_debug*.txt` | Debug log files |
+| `Arduino/firmware/*.fw` | Compiled Arduino firmware |
+| `Odroid/odroid-go-firmware/tools/esp32img/*.bin` | ESP32 tool binaries |
+| `Assets/2.4/` | Deprecated asset version |
+
+### Git Setup Notes
+
+- Git installed via `winget install Git.Git` (v2.53.0)
+- Repository initialized from existing project with one initial commit
+- Remote: `origin` → `https://github.com/giltal/RetroESP32.git`
+- Binary files (firmware `.bin`/`.fw`, SD Card `.zip`/`.rom`) are committed directly (no Git LFS)
 
 ---
 
