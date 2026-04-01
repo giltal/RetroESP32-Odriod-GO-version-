@@ -887,8 +887,8 @@ static int show_game_menu(void)
     uint16_t *menu_fb = (uint16_t *)heap_caps_malloc(320 * 240 * 2, MALLOC_CAP_SPIRAM);
     if (!menu_fb) return 0;
 
-    const char *options[] = { "Continue", "Save & Continue", "Save & Quit", "Restart Game", "Quit to Menu" };
-    int count = 5;
+    const char *options[] = { "Continue", "Save & Continue", "Load State", "Save & Quit", "Restart Game", "Quit to Menu" };
+    int count = 6;
     int selected = 0;
 
     odroid_gamepad_state prev;
@@ -899,7 +899,7 @@ static int show_game_menu(void)
         memset(menu_fb, 0, 320 * 240 * 2);
 
         /* Box dimensions */
-        int bx0 = 50, bx1 = 270, by0 = 30, by1 = 210;
+        int bx0 = 50, bx1 = 270, by0 = 30, by1 = 216;
 
         /* Fill box interior (dark blue) */
         for (int y = by0 + 1; y < by1; y++)
@@ -1123,15 +1123,18 @@ extern "C" void app_main(void)
                 /* Save & Continue */
                 SaveState();
             } else if (choice == 2) {
+                /* Load State */
+                LoadState();
+            } else if (choice == 3) {
                 /* Save & Quit */
                 SaveState();
                 odroid_system_application_set(0);
                 esp_restart();
-            } else if (choice == 3) {
+            } else if (choice == 4) {
                 /* Restart game — clear DataSlot so we don't auto-load */
                 odroid_settings_DataSlot_set(0);
                 esp_restart();
-            } else if (choice == 4) {
+            } else if (choice == 5) {
                 odroid_system_application_set(0);
                 esp_restart(); /* Quit to launcher */
             }
