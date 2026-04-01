@@ -63,6 +63,7 @@ void init_log_file();
 int InitPCE(char *name);
 void TrashPCE();
 int RunPCE(void);
+extern bool pce_gfx_restore;
 void pce_cd_read_sector(void);
 void issue_ADPCM_dma(void);
 

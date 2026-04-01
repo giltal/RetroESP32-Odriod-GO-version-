@@ -1656,11 +1656,37 @@ InitPCE(char *name)
 }
 
 
+extern bool pce_should_resume;
+extern void LoadState(void);
+extern void update_display_task(int width);
+
+/* Flag: tell gfx_init() to preserve VDC state after a state load */
+bool pce_gfx_restore = false;
+
 int
 RunPCE(void)
 {
-	if (!ResetPCE())
+	if (!ResetPCE()) {
+		if (pce_should_resume) {
+			pce_should_resume = false;
+			printf("RunPCE: loading saved state after reset\n");
+			LoadState();
+			pce_gfx_restore = true;
+			/* SetPalette() populates my_palette[] which is uninitialized SPIRAM.
+			 * Normally it runs later via gfx_need_video_mode_change, but with
+			 * VDC CR restored (ScreenON already set), the first frame renders
+			 * before that — reading garbage palette = white screen. */
+			SetPalette();
+			/* Force video task to match restored screen width immediately */
+			printf("RunPCE: forcing display task to width %d\n", (int)io.screen_w);
+			update_display_task(io.screen_w);
+			/* Let the first frame render immediately instead of waiting
+			 * for the frameskip cycle to clear skipNextFrame */
+			extern bool skipNextFrame;
+			skipNextFrame = false;
+		}
 		exe_go();
+	}
 	return 1;
 }
 

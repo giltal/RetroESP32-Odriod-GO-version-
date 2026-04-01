@@ -87,11 +87,6 @@ static void osd_sleep(double s)
 	// Log("Sleeping %f seconds\n", s);
 	if (s > 0)
 	{
-		struct timeval tp;
-
-		tp.tv_sec = 0;
-		tp.tv_usec = 1e6 * s;
-		select(1, NULL, NULL, NULL, &tp);
 		usleep(s * 1e6);
 		// emu_too_fast = 1;
 	}

@@ -1817,6 +1817,9 @@ wait_internet_digest_status (uchar * local_input)
 
 extern void DoMenuHome(bool save);
 extern void EmuAudio(bool enable);
+extern void SaveState();
+extern void LoadState();
+void odroid_settings_DataSlot_set(int32_t value);
 
     bool menu_restart = false;
     bool ignoreMenuButton = true;
@@ -1859,17 +1862,18 @@ void menu_pceninge_init(odroid_ui_window *window) {
 }
 
 /*
- * show_game_menu - Display an in-game menu with Continue / Restart / Quit
+ * show_game_menu - Display an in-game menu with save state options
  * Uses odroid_ui_draw_chars (8x8 font) and odroid_display_lock to safely
  * overlay on top of the running video task.
- * Returns: 0 = Continue, 1 = Restart Game, 2 = Quit to Menu
+ * Returns: 0 = Continue, 1 = Save & Continue, 2 = Save & Quit,
+ *          3 = Load State, 4 = Restart Game, 5 = Quit to Menu
  */
 static int show_game_menu(void)
 {
-    /* Menu geometry: 20 chars wide (160px), 7 lines tall (56px), centered */
+    /* Menu geometry: 20 chars wide (160px), 10 lines tall (80px), centered */
     const int MW = 20;          /* width in characters */
     const int MX = (320 - MW * 8) / 2;  /* 80 px */
-    const int MY = (240 - 7 * 8) / 2;   /* 92 px */
+    const int MY = (240 - 10 * 8) / 2;  /* 80 px */
 
     const uint16_t bg    = C_NAVY;
     const uint16_t title = C_WHITE;
@@ -1877,7 +1881,9 @@ static int show_game_menu(void)
     const uint16_t sel_fg = C_NAVY;
     const uint16_t sel_bg = C_YELLOW;
 
-    const char *labels[3] = { "  Continue", "  Restart Game", "  Quit to Menu" };
+    const int NUM_ITEMS = 6;
+    const char *labels[6] = { "  Continue", "  Save & Continue", "  Save & Quit",
+                               "  Load State", "  Restart Game", "  Quit to Menu" };
     int cur = 0;           /* currently selected item */
     int prev_cur = -1;     /* force initial draw */
 
@@ -1887,7 +1893,7 @@ static int show_game_menu(void)
     odroid_ui_draw_chars(MX, MY + 0*8, MW, " ", title, bg);          /* top padding */
     odroid_ui_draw_chars(MX, MY + 1*8, MW, "    GAME  MENU", title, bg);  /* title */
     odroid_ui_draw_chars(MX, MY + 2*8, MW, " ", title, bg);          /* spacer */
-    odroid_ui_draw_chars(MX, MY + 6*8, MW, " ", norm, bg);           /* bottom padding */
+    odroid_ui_draw_chars(MX, MY + 9*8, MW, " ", norm, bg);           /* bottom padding */
 
     /* Wait for MENU key to be released first */
     odroid_gamepad_state js;
@@ -1904,7 +1910,7 @@ static int show_game_menu(void)
         /* Redraw options only when selection changes */
         if (cur != prev_cur) {
             int i;
-            for (i = 0; i < 3; i++) {
+            for (i = 0; i < NUM_ITEMS; i++) {
                 uint16_t fg = (i == cur) ? sel_fg : norm;
                 uint16_t cbg = (i == cur) ? sel_bg : bg;
                 char buf[24];
@@ -1922,10 +1928,10 @@ static int show_game_menu(void)
         } else {
             if (js.values[ODROID_INPUT_UP]) {
                 last_key = ODROID_INPUT_UP;
-                cur = (cur > 0) ? cur - 1 : 2;
+                cur = (cur > 0) ? cur - 1 : NUM_ITEMS - 1;
             } else if (js.values[ODROID_INPUT_DOWN]) {
                 last_key = ODROID_INPUT_DOWN;
-                cur = (cur < 2) ? cur + 1 : 0;
+                cur = (cur < NUM_ITEMS - 1) ? cur + 1 : 0;
             } else if (js.values[ODROID_INPUT_A]) {
                 last_key = ODROID_INPUT_A;
                 result = cur;
@@ -1969,15 +1975,30 @@ osd_keyboard (void)
     }
     if (menuButtonFrameCount > 60 * 2)
     {
-        DoMenuHome(true);
+        SaveState();
+        odroid_settings_DataSlot_set(1);
+        DoMenuHome(false);
     }
     if (!ignoreMenuButton && previousJoystickState.values[ODROID_INPUT_MENU] && !joystick.values[ODROID_INPUT_MENU])
     {
         int choice = show_game_menu();
         if (choice == 1) {
-            /* Restart Game */
-            esp_restart();
+            /* Save & Continue */
+            SaveState();
+            odroid_settings_DataSlot_set(1);
         } else if (choice == 2) {
+            /* Save & Quit */
+            SaveState();
+            odroid_settings_DataSlot_set(1);
+            DoMenuHome(false);
+        } else if (choice == 3) {
+            /* Load State */
+            LoadState();
+        } else if (choice == 4) {
+            /* Restart Game */
+            odroid_settings_DataSlot_set(0);
+            esp_restart();
+        } else if (choice == 5) {
             /* Quit to Menu */
             DoMenuHome(false);
         }

@@ -33,8 +33,12 @@ extern char *syscard_filename;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #define NOINLINE  __attribute__ ((noinline))
+
+/* Flag: load save state after ResetPCE() in RunPCE() */
+bool pce_should_resume = false;
 
 const char* SD_BASE_PATH = "/sd";
 #define PATH_MAX_MY 128
@@ -423,6 +427,11 @@ NOINLINE void app_init(void)
     strcpy(ISO_filename, "");
     strcpy(sav_basepath,"/sd/odroid/data");
     strcpy(sav_path,"pce");
+
+    /* Ensure save directory exists */
+    mkdir("/sd/odroid", 0755);
+    mkdir("/sd/odroid/data", 0755);
+    mkdir("/sd/odroid/data/pce", 0755);
     
     framebuffer[0] = my_special_alloc(false, 1, XBUF_WIDTH * XBUF_HEIGHT);
     // framebuffer[0] = heap_caps_malloc(XBUF_WIDTH * XBUF_HEIGHT, MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
@@ -455,6 +464,16 @@ NOINLINE void app_init(void)
     
     InitPCE(rom_file);
     osd_init_machine();
+
+    /* DataSlot-based auto-load: set flag, actual load happens after ResetPCE() */
+    {
+        int32_t dataSlot = odroid_settings_DataSlot_get();
+        printf("pcengine: DataSlot=%d\n", dataSlot);
+        if (dataSlot == 1) {
+            pce_should_resume = true;
+        }
+        odroid_settings_DataSlot_set(0); /* clear to prevent crash-resume loops */
+    }
 #ifdef MY_GFX_AS_TASK
     update_display_task(77);
 #endif
@@ -492,12 +511,235 @@ void app_main(void)
 }
 
 
-bool QuickLoadState(FILE *f)
-{
-    return false;
-}
+/*
+ * Save state format (version 2):
+ *   4 bytes: magic "PCE\x02"
+ *   CPU registers + timing
+ *   IO struct (raw, pointers patched on load)
+ *   VCE palette (0x200 pairs = 1024 bytes)
+ *   PSG DA data (6 * 1024 = 6144 bytes)
+ *   RAM (0x8000 = 32768 bytes)
+ *   WRAM (0x2000 = 8192 bytes)
+ *   VRAM (0x10000 = 65536 bytes)
+ *   SPRAM (64*4*2 = 512 bytes)
+ *   Pal (512 bytes)
+ *   snd_vol[6][32] (192 bytes)
+ *   VDC registers (21 pairs = 42 bytes)
+ *   Total: ~116 KB
+ */
+
+extern uint32 TimerCount;
+extern signed char snd_vol[6][32];
+extern DRAM_ATTR uint32 reg_pc_;
+extern DRAM_ATTR uchar reg_a_;
+extern DRAM_ATTR uchar reg_x_;
+extern DRAM_ATTR uchar reg_y_;
+extern DRAM_ATTR uchar reg_p_;
+extern DRAM_ATTR uchar reg_s_;
+extern DRAM_ATTR uint32 cycles_;
+
+#define SAVE_MAGIC "PCE\x02"
 
 bool QuickSaveState(FILE *f)
 {
-    return false;
+    if (!f) return false;
+
+    /* Magic */
+    fwrite(SAVE_MAGIC, 1, 4, f);
+
+    /* CPU registers */
+    fwrite(&reg_pc_, sizeof(reg_pc_), 1, f);
+    fwrite(&reg_a_, sizeof(reg_a_), 1, f);
+    fwrite(&reg_x_, sizeof(reg_x_), 1, f);
+    fwrite(&reg_y_, sizeof(reg_y_), 1, f);
+    fwrite(&reg_p_, sizeof(reg_p_), 1, f);
+    fwrite(&reg_s_, sizeof(reg_s_), 1, f);
+    fwrite(&cycles_, sizeof(cycles_), 1, f);
+
+    /* Memory mapping */
+    fwrite(mmr, 1, 8, f);
+
+    /* Timing */
+    fwrite(&TimerCount, sizeof(TimerCount), 1, f);
+    uint32 sc = scanline;
+    fwrite(&sc, sizeof(sc), 1, f);
+    uint32 cc = cyclecount;
+    fwrite(&cc, sizeof(cc), 1, f);
+    uint32 cco = *p_cyclecountold;
+    fwrite(&cco, sizeof(cco), 1, f);
+
+    /* IO struct — save raw (includes embedded pointer values, patched on load) */
+    fwrite(&io, sizeof(IO), 1, f);
+
+    /* VCE palette data */
+    fwrite(io.VCE, sizeof(pair), 0x200, f);
+
+    /* PSG direct access data */
+    for (int i = 0; i < 6; i++) {
+        fwrite(io.psg_da_data[i], 1, PSG_DIRECT_ACCESS_BUFSIZE, f);
+    }
+
+    /* RAM */
+    fwrite(RAM, 1, 0x8000, f);
+
+    /* WRAM (backup RAM) */
+    fwrite(WRAM, 1, 0x2000, f);
+
+    /* VRAM */
+    fwrite(VRAM, 1, 0x10000, f);
+
+    /* Sprite RAM */
+    fwrite(SPRAM, sizeof(uint16), 64 * 4, f);
+
+    /* Palette conversion table */
+    fwrite(Pal, 1, 512, f);
+
+    /* PSG volume table */
+    fwrite(snd_vol, 1, sizeof(snd_vol), f);
+
+    /* VDC registers (21 standalone globals, NOT part of io struct) */
+    fwrite(&IO_VDC_00_MAWR, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_01_MARR, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_02_VWR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_03_vdc3, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_04_vdc4, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_05_CR,   sizeof(pair), 1, f);
+    fwrite(&IO_VDC_06_RCR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_07_BXR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_08_BYR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_09_MWR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0A_HSR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0B_HDR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0C_VPR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0D_VDW,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0E_VCR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_0F_DCR,  sizeof(pair), 1, f);
+    fwrite(&IO_VDC_10_SOUR, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_11_DISTR,sizeof(pair), 1, f);
+    fwrite(&IO_VDC_12_LENR, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_13_SATB, sizeof(pair), 1, f);
+    fwrite(&IO_VDC_14,      sizeof(pair), 1, f);
+
+    printf("QuickSaveState: saved OK\n");
+    return true;
+}
+
+bool QuickLoadState(FILE *f)
+{
+    if (!f) return false;
+
+    /* Verify magic */
+    char magic[4];
+    if (fread(magic, 1, 4, f) != 4) return false;
+    if (memcmp(magic, SAVE_MAGIC, 4) != 0) {
+        printf("QuickLoadState: bad magic\n");
+        return false;
+    }
+
+    /* CPU registers */
+    fread(&reg_pc_, sizeof(reg_pc_), 1, f);
+    fread(&reg_a_, sizeof(reg_a_), 1, f);
+    fread(&reg_x_, sizeof(reg_x_), 1, f);
+    fread(&reg_y_, sizeof(reg_y_), 1, f);
+    fread(&reg_p_, sizeof(reg_p_), 1, f);
+    fread(&reg_s_, sizeof(reg_s_), 1, f);
+    fread(&cycles_, sizeof(cycles_), 1, f);
+
+    /* Memory mapping — save current values, restore after bank_set */
+    uchar saved_mmr[8];
+    fread(saved_mmr, 1, 8, f);
+
+    /* Timing */
+    fread(&TimerCount, sizeof(TimerCount), 1, f);
+    uint32 sc, cc, cco;
+    fread(&sc, sizeof(sc), 1, f);
+    *p_scanline = sc;
+    fread(&cc, sizeof(cc), 1, f);
+    *p_cyclecount = cc;
+    fread(&cco, sizeof(cco), 1, f);
+    *p_cyclecountold = cco;
+
+    /* IO struct — save current pointers before overwriting */
+    pair *cur_VCE = io.VCE;
+    uchar *cur_psg_da[6];
+    for (int i = 0; i < 6; i++) cur_psg_da[i] = io.psg_da_data[i];
+
+    /* Load IO struct (overwrites pointers with stale values from save) */
+    fread(&io, sizeof(IO), 1, f);
+
+    /* Restore valid pointers from current session */
+    io.VCE = cur_VCE;
+    for (int i = 0; i < 6; i++) io.psg_da_data[i] = cur_psg_da[i];
+
+    /* Load VCE palette data */
+    fread(io.VCE, sizeof(pair), 0x200, f);
+
+    /* Load PSG direct access data */
+    for (int i = 0; i < 6; i++) {
+        fread(io.psg_da_data[i], 1, PSG_DIRECT_ACCESS_BUFSIZE, f);
+    }
+
+    /* RAM */
+    fread(RAM, 1, 0x8000, f);
+
+    /* WRAM */
+    fread(WRAM, 1, 0x2000, f);
+
+    /* VRAM */
+    fread(VRAM, 1, 0x10000, f);
+
+    /* Sprite RAM */
+    fread(SPRAM, sizeof(uint16), 64 * 4, f);
+
+    /* Palette conversion table */
+    fread(Pal, 1, 512, f);
+
+    /* PSG volume table */
+    fread(snd_vol, 1, sizeof(snd_vol), f);
+
+    /* VDC registers (21 standalone globals) */
+    fread(&IO_VDC_00_MAWR, sizeof(pair), 1, f);
+    fread(&IO_VDC_01_MARR, sizeof(pair), 1, f);
+    fread(&IO_VDC_02_VWR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_03_vdc3, sizeof(pair), 1, f);
+    fread(&IO_VDC_04_vdc4, sizeof(pair), 1, f);
+    fread(&IO_VDC_05_CR,   sizeof(pair), 1, f);
+    fread(&IO_VDC_06_RCR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_07_BXR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_08_BYR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_09_MWR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0A_HSR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0B_HDR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0C_VPR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0D_VDW,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0E_VCR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_0F_DCR,  sizeof(pair), 1, f);
+    fread(&IO_VDC_10_SOUR, sizeof(pair), 1, f);
+    fread(&IO_VDC_11_DISTR,sizeof(pair), 1, f);
+    fread(&IO_VDC_12_LENR, sizeof(pair), 1, f);
+    fread(&IO_VDC_13_SATB, sizeof(pair), 1, f);
+    fread(&IO_VDC_14,      sizeof(pair), 1, f);
+
+    /* Rebuild memory bank mapping from saved MMR */
+    for (int i = 0; i < 8; i++) {
+        bank_set(i, saved_mmr[i]);
+    }
+
+    /* Rebuild zp_base and sp_base from current RAM pointer */
+    extern uchar *zp_base;
+    extern uchar *sp_base;
+    zp_base = RAM;
+    sp_base = RAM + 0x100;
+
+    /* Mark all tile/sprite caches dirty so VRAM2/VRAMS rebuild */
+    extern uchar *vchange, *vchanges;
+    memset(vchange, 1, 0x10000 / 32);
+    memset(vchanges, 1, 0x10000 / 128);
+
+    /* Force video mode reconfiguration so display task matches loaded screen_w */
+    extern int gfx_need_video_mode_change;
+    gfx_need_video_mode_change = 1;
+
+    printf("QuickLoadState: loaded OK\n");
+    return true;
 }

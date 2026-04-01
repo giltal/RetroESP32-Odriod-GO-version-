@@ -1,6 +1,6 @@
 # RetroESP32 Development Notes
 
-> Last updated: March 23, 2026
+> Last updated: April 1, 2026
 > These notes document all custom modifications made to the RetroESP32 firmware for Odroid Go.
 
 ---
@@ -869,6 +869,8 @@ The Odroid Go battery monitor reads ADC1_CH0 every 500ms in a background task �
 | v3.14 | March 22–23, 2026 | Safe mode A-button bail-out added to all 9 emulators, volume clamp fix (abort→clamp) in all 9 emulators, Stella -O3 optimization, frodo-go/C64 removed from docs, full FW v3.14 generated |
 | v3.14.1 | March 23, 2026 | GitHub repository created (github.com/giltal/RetroESP32), project pushed with curated .gitignore, SD Card contents and firmware binaries added for flashing |
 | v3.15 | March 23, 2026 | ZX Spectrum Kempston joystick fix — gamepad now writes directly to Kempston port 0x1F (was only mapped to keyboard keys), built and flashed |
+| v3.16 | March 31, 2026 | PC Engine save states + DataSlot launcher integration — full machine state serialization (~116 KB), 6-option in-game menu (Save & Continue, Save & Quit, Load State), auto-resume from launcher |
+| v3.16.2 | April 1, 2026 | PC Engine resume display fix — VDC registers added to save state (format v2), palette initialization, skipNextFrame reset, 32-bit palette conversion optimization |
 
 ---
 
@@ -2001,3 +2003,118 @@ The Kempston byte is written to `z80_inports[0x1F]` before the existing keyboard
 ### Build & Flash
 
 Built with `make -j4 app`, flashed to `0x550000` (ota_4) on COM17 at 2000000 baud. Binary size: 436,736 bytes. Updated `Firmware/Bins/spectrum.bin`.
+
+---
+
+## v3.16 — PC Engine Save States + DataSlot Integration
+
+### Overview
+
+Added full save/load state support to the PC Engine (HuExpress) emulator, with launcher Resume/Restart integration via the DataSlot protocol. The `QuickSaveState()` and `QuickLoadState()` functions were previously stubs returning `false` — now they serialize/deserialize the full machine state (~116 KB) to SD card.
+
+### Save State Implementation
+
+**File:** `Emulators/odroid-go-pcengine-huexpress/pcengine-go/main/main.c`
+
+The HuExpress core has no built-in save state infrastructure. Implemented full machine state serialization covering:
+
+| Component | Size | Contents |
+|-----------|------|----------|
+| Magic header | 4B | `"PCE\x02"` version tag |
+| CPU registers | 13B | `reg_pc_`, `reg_a_`, `reg_x_`, `reg_y_`, `reg_p_`, `reg_s_`, `cycles_` |
+| MMR | 8B | Memory bank mapping registers |
+| Timing | 16B | `TimerCount`, `scanline`, `cyclecount`, `cyclecountold` |
+| IO struct | ~7.6KB | VDC, VCE control regs, PSG regs, joypad, timer, IRQ, CD-ROM state |
+| VCE palette | 1024B | 512 color entries (pair × 0x200) |
+| PSG DA data | 6144B | 6 channels × 1024 bytes direct access buffers |
+| RAM | 32768B | Main work RAM |
+| WRAM | 8192B | Backup/save RAM |
+| VRAM | 65536B | Video RAM |
+| SPRAM | 512B | Sprite attribute table (64 × 4 × uint16) |
+| Pal | 512B | PCE→RGB palette conversion |
+| snd_vol | 192B | PSG volume table (6 × 32) |
+| VDC registers | 42B | 21 standalone VDC pair registers (IO_VDC_00..IO_VDC_14) |
+| **Total** | **~116 KB** | |
+
+**IO struct pointer handling:** The IO struct contains heap pointers (`VCE`, `psg_da_data[6]`) that are meaningless across sessions. On save, the struct is written as-is. On load, the current session's valid pointers are preserved before overwriting the struct, then restored after. The pointed-to data (VCE palette, PSG DA buffers) is saved/loaded separately.
+
+**Post-load restoration:**
+1. `bank_set(i, mmr[i])` for all 8 banks — rebuilds `PageR`/`PageW` memory mapping
+2. `zp_base = RAM`, `sp_base = RAM + 0x100` — restores CPU zero-page/stack pointers
+3. `memset(vchange, 1, ...)` and `memset(vchanges, 1, ...)` — marks all tile/sprite caches dirty so `VRAM2`/`VRAMS` are rebuilt on next frame (avoids saving 128 KB of rebuildable cache data)
+
+**Save path:** `/sd/odroid/data/pce/<romfilename>.pce.sav` — uses the existing `odroid_sdcard_create_savefile_path()` which is called by `SaveState()` in `odroid_ui.c`.
+
+### In-Game Menu (5 Options)
+
+**File:** `Emulators/odroid-go-pcengine-huexpress/pcengine-go/components/huexpress/osd_keyboard.c`
+
+Expanded `show_game_menu()` from 3 to 5 options:
+
+| # | Option | Action |
+|---|--------|--------|
+| 0 | Continue | Resume emulation |
+| 1 | Save & Continue | `SaveState()` + `DataSlot=1`, resume |
+| 2 | Save & Quit | `SaveState()` + `DataSlot=1`, return to launcher |
+| 3 | Restart Game | `DataSlot=0`, `esp_restart()` |
+| 4 | Quit to Menu | Return to launcher without saving |
+
+Menu box enlarged from 7 to 9 lines (72px) to accommodate 5 options. Long-press MENU (>2s) now saves state and quits (previously called `DoMenuHome(true)` which used the stub save).
+
+### DataSlot Protocol
+
+**Emulator side (`main.c`):**
+- On boot: reads `DataSlot` after `InitPCE()`. If `==1`, calls `LoadState()` → `QuickLoadState()`. Clears `DataSlot=0` after reading.
+- On save: sets `DataSlot=1` so next boot (or launcher Resume) auto-loads.
+- On restart: sets `DataSlot=0` before `esp_restart()`.
+
+**Launcher side:** No changes needed — the launcher's `has_save_file()`, `rom_run()`, `rom_resume()`, and `draw_launcher_options()` are fully system-agnostic and already handle PCE saves at `/sd/odroid/data/pce/`.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `pcengine-go/main/main.c` | Implemented `QuickSaveState()` / `QuickLoadState()` with full state serialization, added DataSlot auto-load after `InitPCE()` |
+| `pcengine-go/components/huexpress/osd_keyboard.c` | 5-option menu, `SaveState()`/DataSlot calls in menu handler, long-press handler updated |
+
+### Build & Flash
+
+Built with `make -j4 app`, flashed to `0x930000` (ota_8) on COM27 at 2000000 baud. Binary size: 693,584 bytes (was 691,456). Updated `Firmware/Bins/pcengine-go.bin`.
+
+### Bug Fixes: Launcher Resume Display (v3.16.1 → v3.16.2)
+
+Three separate bugs caused the display to be broken after launcher Resume (sound always worked, confirming CPU emulation was running):
+
+**Bug 1 — White screen (uninitialized palette):**
+`my_palette[]` is allocated from SPIRAM via `my_special_alloc(false, ...)` but never initialized. Uninitialized SPIRAM reads as `0xFF`, so `my_palette[i] = 0xFFFF` = white RGB565. `SetPalette()` normally runs via `gfx_need_video_mode_change` at VBlank (scanline 256), but with VDC CR preserved (ScreenON set), the first frame renders before `SetPalette()` has a chance to run — reading all-white palette. **Fix:** Added `SetPalette()` call in `RunPCE()` after `LoadState()`, before `exe_go()`.
+
+**Bug 2 — Black screen (VDC registers not in save state):**
+The 21 VDC registers (`IO_VDC_00_MAWR` through `IO_VDC_14`) are standalone globals in `pce.c` — they are NOT inside the `io` struct. `ResetPCE()` → `hard_reset_io()` → `IO_VDC_reset` zeroes them all. The v1 save state only saved/restored the `io` struct, so after resume `IO_VDC_05_CR.W = 0` (ScreenON=0, SpriteON=0). The rendering code (`gfx_render_lines.h`) ran but `RefreshLine()` and `RefreshSpriteExact()` check `ScreenON`/`SpriteON` bits — with both zero, nothing was drawn. The `gfx_init()` macro fix was irrelevant because it only prevented gfx_init from clearing CR, but CR was already zero from the reset. **Fix:** Added all 21 VDC registers to save/load state. Bumped magic from `PCE\x01` to `PCE\x02` (old saves won't load — must re-save).
+
+**Bug 3 — First frame skip (skipNextFrame initialization):**
+`skipNextFrame` in `osd_sdl_gfx.c` starts as `true`. The frameskip logic only sets it to `false` inside `osd_gfx_put_image_normal()` when `(frame % frameskip) == 0`. On the first frame after resume, `skipNextFrame=true` prevents rendering, producing a blank framebuffer. While this self-corrects after 1-3 frames, it means the first displayed frame is black. **Fix:** Added `skipNextFrame = false` in `RunPCE()` resume path before `exe_go()`.
+
+**Bug 4 — gfx_init() clearing VDC CR:**
+`exe_go()` calls `gfx_init()` which unconditionally cleared `IO_VDC_05_CR.W = 0`. After `LoadState()` restores the saved VDC CR, `gfx_init()` would wipe it. **Fix:** Modified `gfx_init()` macro to check a `pce_gfx_restore` flag — when true, skips the clear and forces video mode change instead.
+
+**Bug 5 — Stale h6280.o (build system):**
+The `gfx_init()` macro fix was in `gfx.h`, but `h6280.c` (which includes it via `h6280_exe_go.h`) was not recompiled by the build system. Required manual deletion of `build/huexpress/engine/h6280.o` to force recompilation.
+
+### 32-bit Palette Conversion Optimization
+
+Added `PAL_CONVERT_LINE_4X` macro to `odroid_display_pcengine.h`, applied to all 5 display functions (mode0, w224, w256, w320, w336). Reads 4 source pixels per iteration via `uint32_t` access, clears framebuffer and SPM with word writes, packs 2 RGB565 palette outputs per `uint32_t` write to line buffer. Reduces SPIRAM cache line fetches and instruction count vs byte-at-a-time loop. All PCE widths are divisible by 4.
+
+### Double-Sleep Fix
+
+Removed redundant `select()` call from `osd_sleep()` in `utils.c`. The function had both `select(0, 0, 0, 0, &tv)` and `usleep(microseconds)` — the `select()` was dead code when `MY_VSYNC_DISABLE` is defined (which it is), but was a latent bug.
+
+### Files Modified (v3.16.2)
+
+| File | Changes |
+|------|---------|
+| `main/main.c` | Save format v2 (`PCE\x02`): added 21 VDC registers to `QuickSaveState()`/`QuickLoadState()` |
+| `engine/pce.c` | Added `SetPalette()`, `update_display_task()`, `skipNextFrame=false` in resume path |
+| `engine/gfx.h` | `gfx_init()` macro: conditional VDC CR preservation via `pce_gfx_restore` flag |
+| `engine/pce.h` | Added `extern bool pce_gfx_restore` |
+| `osd_sdl_gfx.c` | `osd_sleep()`: removed redundant `select()` |
+| `odroid_display_pcengine.h` | Added `PAL_CONVERT_LINE_4X` macro, applied to all 5 display functions |

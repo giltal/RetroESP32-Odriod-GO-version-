@@ -117,9 +117,14 @@ void save_gfx_context_(int slot_number);
 
 #define gfx_init() \
     UCount = 0; \
-    gfx_need_video_mode_change = 0; \
     gfx_need_redraw = 0; \
-    IO_VDC_05_CR.W = 0;
+    if (pce_gfx_restore) { \
+        pce_gfx_restore = false; \
+        gfx_need_video_mode_change = 1; \
+    } else { \
+        gfx_need_video_mode_change = 0; \
+        IO_VDC_05_CR.W = 0; \
+    }
 
 #else
 #define save_gfx_context(slot_number) save_gfx_context_(slot_number)

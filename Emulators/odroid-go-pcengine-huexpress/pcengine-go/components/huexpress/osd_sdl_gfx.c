@@ -549,7 +549,6 @@ osd_gfx_init_normal_mode()
 void
 osd_gfx_put_image_normal(void)
 {
-   //printf("%s: %d\n", __func__, my_frame);
    /*
    if ((my_frame%15)==0)
    {
@@ -558,7 +557,6 @@ osd_gfx_put_image_normal(void)
    */
     if ((my_frame%frameskip)==1)
     {
-    // printf("RES: (%dx%d)\n", io.screen_w, io.screen_h);
 #ifdef MY_GFX_AS_TASK
 #ifndef MY_VIDEO_MODE_SCANLINES
     xQueueSend(vidQueue, &osd_gfx_buffer, portMAX_DELAY);
